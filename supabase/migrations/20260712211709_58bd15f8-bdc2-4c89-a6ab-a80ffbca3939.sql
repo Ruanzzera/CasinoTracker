@@ -1,0 +1,1 @@
+ALTER TABLE public.casino_entries ADD COLUMN IF NOT EXISTS account text NOT NULL DEFAULT 'Ruan';

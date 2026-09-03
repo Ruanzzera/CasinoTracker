@@ -1,0 +1,3 @@
+-- Remove old function signatures without p_account to avoid overload ambiguity
+DROP FUNCTION IF EXISTS public.bet_and_win_create(date, text, text, text, text, numeric, numeric, numeric, numeric, integer, numeric, numeric, timestamp with time zone);
+DROP FUNCTION IF EXISTS public.bet_and_win_update(uuid, date, text, text, text, text, numeric, numeric, numeric, numeric, integer, numeric, numeric, timestamp with time zone);

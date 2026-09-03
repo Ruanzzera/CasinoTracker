@@ -1,0 +1,1 @@
+ALTER TABLE public.casino_entries DROP CONSTRAINT IF EXISTS casino_entries_type_check;

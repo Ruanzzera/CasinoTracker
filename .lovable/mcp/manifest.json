@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "sdk_version": "0.22.2",
+  "path": "/functions/v1/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://bkscfulrsocwdwckgzgw.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "casino-tracker-mcp",
+      "version": "0.1.0",
+      "title": "Casino Tracker MCP"
+    },
+    "tools": [
+      {
+        "name": "list_recent_entries",
+        "title": "List recent casino entries",
+        "description": "List the signed-in user's most recent casino profit entries (dashboard history).",
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "How many entries to return."
+            },
+            "account": {
+              "type": "string",
+              "enum": [
+                "Ruan",
+                "Rita"
+              ],
+              "description": "Filter by account (Ruan or Rita)."
+            },
+            "house": {
+              "type": "string",
+              "description": "Filter by casino/house name."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "create_entry",
+        "title": "Create casino entry",
+        "description": "Create a new profit/loss entry in the signed-in user's dashboard.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "amount": {
+              "type": "number",
+              "description": "Profit (positive) or loss (negative) amount."
+            },
+            "type": {
+              "type": "string",
+              "description": "Entry type (e.g. bonus, giros, apostas, missao, aposte_ganhe)."
+            },
+            "house": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Casino/house name."
+            },
+            "game": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Game name."
+            },
+            "account": {
+              "type": "string",
+              "enum": [
+                "Ruan",
+                "Rita"
+              ],
+              "default": "Ruan"
+            },
+            "notes": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "type",
+            "house",
+            "game"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "month_summary",
+        "title": "Month summary",
+        "description": "Summarize the signed-in user's profits for a given month (default: current month, Brasília time).",
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "year": {
+              "type": "integer",
+              "minimum": 2020,
+              "maximum": 2100
+            },
+            "month": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12,
+              "description": "1-12"
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_daily_tasks",
+        "title": "List daily tasks",
+        "description": "List today's daily tasks for the signed-in user with completion status per account (Brasília timezone).",
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
