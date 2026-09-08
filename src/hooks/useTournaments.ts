@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { Database } from '@/integrations/supabase/types';
 import { normalizeHouseName, findExistingHouse } from './useSharedLibrary';
 import { toast } from 'sonner';
 import { monthKeyBRT } from '@/lib/timezone';
 import { useAuth } from '@/hooks/useAuth';
+import { useSharedQuery } from '@/lib/sharedQuery';
+
 
 type TournamentRow = Database['public']['Tables']['tournaments']['Row'];
 type TournamentSessionRow = Database['public']['Tables']['tournament_sessions']['Row'];
@@ -49,11 +51,8 @@ export interface Tournament {
 }
 
 export function useTournaments() {
-  const [tournaments, setTournaments] = useState<Tournament[]>([]);
-  const [sessions, setSessions] = useState<TournamentSession[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [houses, setHouses] = useState<string[]>([]);
   const { user } = useAuth();
+
 
   const mapTournament = (row: TournamentRow): Tournament => ({
     id: row.id,
@@ -94,26 +93,41 @@ export function useTournaments() {
     createdAt: row.created_at,
   });
 
-  const fetchData = useCallback(async () => {
-    if (!user) { setLoading(false); return; }
-
+  // Uma única busca compartilhada entre a página de Torneios e a faixa de
+  // notícias do painel (cache de sessão + dedupe de chamadas simultâneas).
+  const fetcher = useCallback(async () => {
     const [tRes, sRes] = await Promise.all([
-      supabase.from('tournaments').select('*').order('created_at', { ascending: false }),
-      supabase.from('tournament_sessions').select('*').order('created_at', { ascending: true }),
+      supabase.from('tournaments').select('*').order('created_at', { ascending: false }).limit(500),
+      supabase.from('tournament_sessions').select('*').order('created_at', { ascending: true }).limit(2000),
     ]);
 
-    if (tRes.error) { console.error(tRes.error?.message); setLoading(false); return; }
-    if (sRes.error) { console.error(sRes.error?.message); setLoading(false); return; }
+    if (tRes.error) throw tRes.error;
+    if (sRes.error) throw sRes.error;
 
-    const ts = (tRes.data || []).map(mapTournament);
-    const ss = (sRes.data || []).map(mapSession);
-    setTournaments(ts);
-    setSessions(ss);
-    setHouses([...new Set(ts.map(t => t.house))]);
-    setLoading(false);
-  }, [user]);
+    return {
+      tournaments: (tRes.data || []).map(mapTournament),
+      sessions: (sRes.data || []).map(mapSession),
+    };
+  }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const { data, loading, update, refresh } = useSharedQuery<{ tournaments: Tournament[]; sessions: TournamentSession[] }>(
+    'tournaments_bundle',
+    fetcher,
+    { ttlMs: 5 * 60 * 1000, enabled: !!user },
+  );
+
+  const tournaments = data?.tournaments || [];
+  const sessions = data?.sessions || [];
+  const houses = useMemo(() => [...new Set(tournaments.map(t => t.house))], [tournaments]);
+
+  const setTournaments = useCallback((fn: (prev: Tournament[]) => Tournament[]) => {
+    update(prev => ({ tournaments: fn(prev?.tournaments || []), sessions: prev?.sessions || [] }));
+  }, [update]);
+
+  const setSessions = useCallback((fn: (prev: TournamentSession[]) => TournamentSession[]) => {
+    update(prev => ({ tournaments: prev?.tournaments || [], sessions: fn(prev?.sessions || []) }));
+  }, [update]);
+
 
   const createTournament = async (input: Partial<Tournament> & { house: string }) => {
     if (!user) return null;
@@ -148,7 +162,7 @@ export function useTournaments() {
     if (data) {
       const t = mapTournament(data);
       setTournaments(prev => [t, ...prev]);
-      if (!houses.includes(t.house)) setHouses(prev => [...prev, t.house]);
+      // houses é derivado da lista de torneios (useMemo) — nada a atualizar aqui.
     }
     return data?.id as string;
   };
@@ -329,7 +343,7 @@ export function useTournaments() {
   };
 
   return {
-    tournaments, sessions, loading, houses,
+    tournaments, sessions, loading, houses, refetch: refresh,
     createTournament, updateTournament, deleteTournament,
     addSession, updateSession, deleteSession,
     getTournamentStats, finalizeTournament,

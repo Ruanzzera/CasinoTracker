@@ -33,7 +33,7 @@ import { LibraryManagerDialog } from '@/components/LibraryManagerDialog';
 
 const Index = () => {
   const { user } = useAuth();
-  const { houses, games, refresh: refreshLibrary } = useSharedLibrary();
+  const { houses, games, refresh: refreshLibrary, noteNames } = useSharedLibrary();
   const { entries, addEntry, updateEntry, deleteEntry, statistics: stats, chartData } = useCasinoData({ libraryHouses: houses, libraryGames: games });
   const [showLibrary, setShowLibrary] = useState(false);
   const { setGoal, getGoal } = useGoals();
@@ -55,7 +55,9 @@ const Index = () => {
         toast.info(`R$ ${remainder.toFixed(2).replace('.', ',')} enviado ao Tip Jar 🐷`, { duration: 3000 });
       },
     });
-    refreshLibrary();
+    // CÓDIGO ANTIGO (mantido): relia a biblioteca inteira do banco a cada entrada.
+    // refreshLibrary();
+    noteNames(entry.house, entry.game);
   };
 
   const handleLogout = async () => { await supabase.auth.signOut(); };
@@ -211,7 +213,7 @@ const Index = () => {
         onClose={() => setShowLibrary(false)}
         houses={houses}
         games={games}
-        onRefresh={refreshLibrary}
+        onRefresh={() => refreshLibrary(true)}
       />
     </div>
   );

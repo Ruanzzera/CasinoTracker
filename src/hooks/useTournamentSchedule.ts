@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { nowBRT, getDayBRT } from '@/lib/timezone';
 import { useAuth } from '@/hooks/useAuth';
+import { useSharedQuery } from '@/lib/sharedQuery';
+
 
 export interface TournamentScheduleItem {
   id: string;
@@ -61,18 +63,16 @@ export function formatScheduleLabel(item: TournamentScheduleItem): string {
 export const DAY_OF_WEEK_LABELS = DAY_LABELS;
 
 export function useTournamentSchedule() {
-  const [items, setItems] = useState<TournamentScheduleItem[]>([]);
-  const [loading, setLoading] = useState(true);
   const { user } = useAuth();
 
-  const fetch = useCallback(async () => {
-    if (!user) return;
+  const fetcher = useCallback(async (): Promise<TournamentScheduleItem[]> => {
     const { data, error } = await supabase
       .from('tournament_schedule')
       .select('*')
-      .order('created_at', { ascending: false });
-    if (error) { console.error(error?.message); return; }
-    setItems((data || []).map(r => ({
+      .order('created_at', { ascending: false })
+      .limit(300);
+    if (error) throw error;
+    return (data || []).map(r => ({
       id: r.id,
       userId: r.user_id,
       house: r.house,
@@ -83,11 +83,19 @@ export function useTournamentSchedule() {
       timeOfDay: r.time_of_day,
       isActive: r.is_active,
       createdAt: r.created_at,
-    })));
-    setLoading(false);
-  }, [user]);
+    }));
+  }, []);
 
-  useEffect(() => { fetch(); }, [fetch]);
+  const { data, loading, update, refresh } = useSharedQuery<TournamentScheduleItem[]>(
+    'tournament_schedule',
+    fetcher,
+    { ttlMs: 5 * 60 * 1000, enabled: !!user },
+  );
+  const items = data || [];
+  const setItems = useCallback((fn: (prev: TournamentScheduleItem[]) => TournamentScheduleItem[]) => {
+    update(prev => fn(prev || []));
+  }, [update]);
+
 
   const addItem = useCallback(async (item: Omit<TournamentScheduleItem, 'id' | 'userId' | 'createdAt'>) => {
     if (!user) return;
@@ -117,14 +125,14 @@ export function useTournamentSchedule() {
         createdAt: data.created_at,
       }, ...prev]);
     }
-  }, [user]);
+  }, [user, setItems]);
 
   const deleteItem = useCallback(async (id: string) => {
     const { error } = await supabase.from('tournament_schedule').delete().eq('id', id);
     if (error) { toast.error('Erro ao excluir'); return; }
     setItems(prev => prev.filter(i => i.id !== id));
     toast.success('Agenda excluída');
-  }, []);
+  }, [setItems]);
 
   const getUpcomingEvents = useCallback((withinDays = 3) => {
     const now = nowBRT();
@@ -137,5 +145,5 @@ export function useTournamentSchedule() {
       .sort((a, b) => (a.next!.getTime() - b.next!.getTime()));
   }, [items]);
 
-  return { items, loading, addItem, deleteItem, getUpcomingEvents, refetch: fetch };
+  return { items, loading, addItem, deleteItem, getUpcomingEvents, refetch: refresh };
 }

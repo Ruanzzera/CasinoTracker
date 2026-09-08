@@ -7,25 +7,55 @@ import { normalizeHouseName, findExistingHouse, findExistingGame } from '@/hooks
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 
+// Cache de sessão das entradas: evita reler a tabela inteira a cada
+// navegação entre Dashboard e Análises.
+const entriesCache: { data: CasinoEntry[]; fetchedAt: number } = { data: [], fetchedAt: 0 };
+const ENTRIES_TTL_MS = 10 * 60 * 1000;
+
+type DashboardSummary = {
+  totalProfit: number; dailyTotal: number; monthlyTotal: number; yearlyTotal: number;
+  entriesCount: number;
+  bestType: { type: EntryType; total: number } | null;
+  bestHouse: { house: string; total: number } | null;
+  bestGame: { game: string; total: number } | null;
+  bestHour: { hour: number; total: number } | null;
+};
+
 export function useCasinoData(opts?: { libraryHouses?: string[]; libraryGames?: string[] }) {
-  const [entries, setEntries] = useState<CasinoEntry[]>([]);
+  const [entries, setEntries] = useState<CasinoEntry[]>(entriesCache.data);
   const [houses, setHouses] = useState<string[]>([]);
   const [games, setGames] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(entriesCache.fetchedAt === 0);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const libHouses = opts?.libraryHouses ?? [];
   const libGames = opts?.libraryGames ?? [];
   const { user } = useAuth();
 
-  const fetchEntries = useCallback(async () => {
+  const applyEntries = useCallback((formattedEntries: CasinoEntry[]) => {
+    setEntries(formattedEntries);
+    const uniqueHouses = [...new Set(formattedEntries.map(e => e.house))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const uniqueGames = [...new Set(formattedEntries.map(e => e.game))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    setHouses(uniqueHouses);
+    setGames(uniqueGames);
+  }, []);
+
+  const fetchEntries = useCallback(async (force = false) => {
     if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    if (!force && entriesCache.fetchedAt > 0 && Date.now() - entriesCache.fetchedAt < ENTRIES_TTL_MS) {
+      applyEntries(entriesCache.data);
       setLoading(false);
       return;
     }
 
     const { data, error } = await supabase
       .from('casino_entries')
-      .select('*')
+      .select('id, amount, type, house, game, notes, account, created_at')
       .order('created_at', { ascending: false });
+
 
     if (error) {
       console.error('Error fetching entries:', error?.message);
@@ -45,18 +75,41 @@ export function useCasinoData(opts?: { libraryHouses?: string[]; libraryGames?: 
       createdAt: new Date(e.created_at),
     })).filter(e => e.type !== 'torneio'); // Torneios têm montante próprio na página Torneios
 
-    setEntries(formattedEntries);
-    
-    const uniqueHouses = [...new Set(formattedEntries.map(e => e.house))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    const uniqueGames = [...new Set(formattedEntries.map(e => e.game))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    setHouses(uniqueHouses);
-    setGames(uniqueGames);
+    entriesCache.data = formattedEntries;
+    entriesCache.fetchedAt = Date.now();
+    applyEntries(formattedEntries);
     setLoading(false);
+  }, [user, applyEntries]);
+
+  // Resumo agregado calculado no banco (RLS aplicada: SECURITY INVOKER).
+  const fetchSummary = useCallback(async () => {
+    if (!user) return;
+    const { data, error } = await supabase.rpc('dashboard_summary');
+    if (error) {
+      console.error('Error fetching summary:', error?.message);
+      return;
+    }
+    const raw = data as Record<string, unknown> | null;
+    if (!raw) return;
+    const num = (v: unknown) => Number(v ?? 0);
+    setSummary({
+      totalProfit: num(raw.totalProfit),
+      dailyTotal: num(raw.dailyTotal),
+      monthlyTotal: num(raw.monthlyTotal),
+      yearlyTotal: num(raw.yearlyTotal),
+      entriesCount: num(raw.entriesCount),
+      bestType: (raw.bestType as DashboardSummary['bestType']) ?? null,
+      bestHouse: (raw.bestHouse as DashboardSummary['bestHouse']) ?? null,
+      bestGame: (raw.bestGame as DashboardSummary['bestGame']) ?? null,
+      bestHour: (raw.bestHour as DashboardSummary['bestHour']) ?? null,
+    });
   }, [user]);
 
   useEffect(() => {
     fetchEntries();
-  }, [fetchEntries]);
+    fetchSummary();
+  }, [fetchEntries, fetchSummary]);
+
 
   const addEntry = useCallback(async (
     entry: Omit<CasinoEntry, 'id' | 'createdAt'>,
@@ -110,7 +163,21 @@ export function useCasinoData(opts?: { libraryHouses?: string[]; libraryGames?: 
       createdAt: new Date(data.created_at),
     };
 
-    setEntries(prev => [newEntry, ...prev]);
+    setEntries(prev => {
+      const next = [newEntry, ...prev];
+      entriesCache.data = next;
+      return next;
+    });
+    // Atualização otimista do resumo (sem reler a tabela nem chamar a RPC).
+    setSummary(prev => prev ? {
+      ...prev,
+      totalProfit: prev.totalProfit + newEntry.amount,
+      dailyTotal: prev.dailyTotal + newEntry.amount,
+      monthlyTotal: prev.monthlyTotal + newEntry.amount,
+      yearlyTotal: prev.yearlyTotal + newEntry.amount,
+      entriesCount: prev.entriesCount + 1,
+    } : prev);
+
 
     if (!houses.includes(resolvedHouse)) {
       setHouses(prev => [...prev, resolvedHouse].sort((a, b) => a.localeCompare(b, 'pt-BR')));
@@ -156,19 +223,24 @@ export function useCasinoData(opts?: { libraryHouses?: string[]; libraryGames?: 
       return false;
     }
 
-    setEntries(prev => prev.map(e => e.id === id ? {
-      ...e,
-      amount: Number(data.amount),
-      type: data.type as EntryType,
-      house: data.house,
-      game: data.game,
-      notes: data.notes || undefined,
-      account: ((data as { account?: string }).account === 'Rita' ? 'Rita' : 'Ruan') as AccountName,
-      createdAt: new Date(data.created_at),
-    } : e));
+    setEntries(prev => {
+      const next = prev.map(e => e.id === id ? {
+        ...e,
+        amount: Number(data.amount),
+        type: data.type as EntryType,
+        house: data.house,
+        game: data.game,
+        notes: data.notes || undefined,
+        account: ((data as { account?: string }).account === 'Rita' ? 'Rita' : 'Ruan') as AccountName,
+        createdAt: new Date(data.created_at),
+      } : e);
+      entriesCache.data = next;
+      return next;
+    });
+    fetchSummary();
 
     return true;
-  }, [houses, games, libHouses, libGames]);
+  }, [houses, games, libHouses, libGames, fetchSummary]);
 
   const deleteEntry = useCallback(async (id: string) => {
     const { error } = await supabase
@@ -182,8 +254,14 @@ export function useCasinoData(opts?: { libraryHouses?: string[]; libraryGames?: 
       return;
     }
 
-    setEntries(prev => prev.filter(e => e.id !== id));
-  }, []);
+    setEntries(prev => {
+      const next = prev.filter(e => e.id !== id);
+      entriesCache.data = next;
+      return next;
+    });
+    fetchSummary();
+  }, [fetchSummary]);
+
 
   const statistics = useMemo<Statistics>(() => {
     const todayStart = todayStartBRT();
@@ -346,6 +424,24 @@ export function useCasinoData(opts?: { libraryHouses?: string[]; libraryGames?: 
   }, [statistics]);
   const getChartData = useCallback(() => chartData, [chartData]);
 
+  // Resumo do painel vindo do banco (agregado em SQL). Enquanto ele não chega,
+  // ou se falhar, usamos o cálculo antigo feito no navegador (`statistics`).
+  const summaryStatistics = useMemo<Statistics>(() => {
+    if (!summary) return statistics;
+    return {
+      totalProfit: summary.totalProfit,
+      dailyTotal: summary.dailyTotal,
+      monthlyTotal: summary.monthlyTotal,
+      yearlyTotal: summary.yearlyTotal,
+      bestType: summary.bestType,
+      bestHouse: summary.bestHouse,
+      bestGame: summary.bestGame,
+      bestHour: summary.bestHour,
+      highestEntry: statistics.highestEntry,
+      entriesCount: summary.entriesCount,
+    };
+  }, [summary, statistics]);
+
   return {
     entries,
     houses,
@@ -354,9 +450,14 @@ export function useCasinoData(opts?: { libraryHouses?: string[]; libraryGames?: 
     addEntry,
     updateEntry,
     deleteEntry,
-    statistics,
+    // CÓDIGO ANTIGO (mantido): cálculo 100% no navegador.
+    // statistics,
+    statistics: summaryStatistics,
+    statisticsLocal: statistics,
     chartData,
     calculateStatistics,
     getChartData,
+    refresh: fetchEntries,
   };
+
 }

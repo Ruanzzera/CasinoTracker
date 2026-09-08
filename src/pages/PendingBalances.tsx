@@ -29,7 +29,7 @@ interface PendingBalance {
 
 export default function PendingBalances() {
   const { user } = useAuth();
-  const { houses, refresh: refreshLibrary } = useSharedLibrary();
+  const { houses, refresh: refreshLibrary, noteNames } = useSharedLibrary();
   const [items, setItems] = useState<PendingBalance[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -80,8 +80,11 @@ export default function PendingBalances() {
       .single();
     if (error) { toast.error('Erro ao salvar'); return; }
     setItems((prev) => [data as PendingBalance, ...prev]);
+    const savedHouse = (data as PendingBalance).house;
     setHouse(''); setAmount(''); setAccount('Ruan');
-    refreshLibrary();
+    // CÓDIGO ANTIGO (mantido): relia a biblioteca inteira do banco a cada registro.
+    // refreshLibrary();
+    noteNames(savedHouse);
     toast.success('Registrado!');
   };
 

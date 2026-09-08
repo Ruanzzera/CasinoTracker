@@ -25,8 +25,10 @@ export function useTipJar() {
 
     const { data, error } = await supabase
       .from('tip_jar_entries')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .select('id, user_id, amount, description, source_entry_id, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
 
     if (error) {
       console.error('Error fetching tip jar entries:', error?.message);

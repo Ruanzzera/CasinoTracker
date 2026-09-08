@@ -24,7 +24,7 @@ import { ACCOUNTS } from '@/types/casino';
 const BetAndWin = () => {
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { houses, games, refresh: refreshLibrary } = useSharedLibrary();
+  const { houses, games, refresh: refreshLibrary, noteNames } = useSharedLibrary();
   const { entries, loading, totalBalance, unfinalizedBalance, addEntry, updateEntry, deleteEntry, finalizeDay, simulatePromotion, recommendRolloverGames } = useBetAndWin({ libraryHouses: houses, libraryGames: games });
   const [editingEntry, setEditingEntry] = useState<BetAndWinEntry | null>(null);
   const [showSimulator, setShowSimulator] = useState(false);
@@ -92,7 +92,9 @@ const BetAndWin = () => {
       spinPrize: parseFloat(spinPrize || '0'),
       account,
     });
-    refreshLibrary();
+    // CÓDIGO ANTIGO (mantido): relia a biblioteca inteira do banco a cada entrada.
+    // refreshLibrary();
+    noteNames(house, prizeGame || rolloverGame);
     setHouse(''); setRolloverGame(''); setPrizeGame(''); setBetValue('');
     setRequiredBets(''); setInitialBankroll(''); setFinalBankroll('');
     setSpinCount(''); setSpinBet(''); setSpinPrize('');

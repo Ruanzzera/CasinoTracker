@@ -1,31 +1,36 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { CasinoReminder } from '@/types/casino';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
+import { useSharedQuery } from '@/lib/sharedQuery';
+import { useSharedLibrary } from '@/hooks/useSharedLibrary';
+import { getDayBRT } from '@/lib/timezone';
+
+const REMINDERS_KEY = 'casino_reminders';
+const TTL_MS = 5 * 60 * 1000;
+
+// Somente as colunas usadas pela tela (evita trazer a linha inteira).
+const COLUMNS = 'id, user_id, house, title, description, days_of_week, reminder_time, is_active, created_at';
 
 export const useReminders = () => {
-  const [reminders, setReminders] = useState<CasinoReminder[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [houses, setHouses] = useState<string[]>([]);
   const { user } = useAuth();
+  // Casas vêm da biblioteca compartilhada (já em cache) em vez de varrer as entradas.
+  const { houses } = useSharedLibrary();
 
-  const fetchReminders = useCallback(async () => {
-    if (!user) return;
-
+  const fetcher = useCallback(async (): Promise<CasinoReminder[]> => {
     const { data, error } = await supabase
       .from('casino_reminders')
-      .select('*')
-      .eq('user_id', user.id)
+      .select(COLUMNS)
       .order('reminder_time', { ascending: true });
 
     if (error) {
       console.error('Error fetching reminders:', error?.message);
       toast.error('Erro ao carregar lembretes');
-      return;
+      throw error;
     }
 
-    const formattedReminders: CasinoReminder[] = (data || []).map(r => ({
+    return (data || []).map(r => ({
       id: r.id,
       userId: r.user_id,
       house: r.house,
@@ -36,29 +41,23 @@ export const useReminders = () => {
       isActive: r.is_active,
       createdAt: new Date(r.created_at),
     }));
+  }, []);
 
-    setReminders(formattedReminders);
-    setLoading(false);
-  }, [user]);
+  const { data, loading, refresh, update } = useSharedQuery<CasinoReminder[]>(
+    REMINDERS_KEY,
+    fetcher,
+    { ttlMs: TTL_MS, enabled: !!user },
+  );
 
+  const reminders = data || [];
+
+  /* ===== CÓDIGO ANTIGO (varredura de casino_entries só para listar casas) =====
   const fetchHouses = useCallback(async () => {
     if (!user) return;
-
-    const { data } = await supabase
-      .from('casino_entries')
-      .select('house')
-      .eq('user_id', user.id);
-
-    if (data) {
-      const uniqueHouses = [...new Set(data.map(e => e.house))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-      setHouses(uniqueHouses);
-    }
+    const { data } = await supabase.from('casino_entries').select('house').eq('user_id', user.id);
+    ...
   }, [user]);
-
-  useEffect(() => {
-    fetchReminders();
-    fetchHouses();
-  }, [fetchReminders, fetchHouses]);
+  ===== FIM CÓDIGO ANTIGO ===== */
 
   const addReminder = useCallback(async (reminder: Omit<CasinoReminder, 'id' | 'userId' | 'createdAt'>) => {
     if (!user) {
@@ -66,7 +65,7 @@ export const useReminders = () => {
       return;
     }
 
-    const { data, error } = await supabase
+    const { data: row, error } = await supabase
       .from('casino_reminders')
       .insert({
         user_id: user.id,
@@ -77,7 +76,7 @@ export const useReminders = () => {
         reminder_time: reminder.reminderTime,
         is_active: reminder.isActive,
       })
-      .select()
+      .select(COLUMNS)
       .single();
 
     if (error) {
@@ -87,20 +86,20 @@ export const useReminders = () => {
     }
 
     const newReminder: CasinoReminder = {
-      id: data.id,
-      userId: data.user_id,
-      house: data.house,
-      title: data.title,
-      description: data.description || undefined,
-      daysOfWeek: data.days_of_week || [],
-      reminderTime: data.reminder_time,
-      isActive: data.is_active,
-      createdAt: new Date(data.created_at),
+      id: row.id,
+      userId: row.user_id,
+      house: row.house,
+      title: row.title,
+      description: row.description || undefined,
+      daysOfWeek: row.days_of_week || [],
+      reminderTime: row.reminder_time,
+      isActive: row.is_active,
+      createdAt: new Date(row.created_at),
     };
 
-    setReminders(prev => [...prev, newReminder].sort((a, b) => a.reminderTime.localeCompare(b.reminderTime)));
+    update(prev => [...(prev || []), newReminder].sort((a, b) => a.reminderTime.localeCompare(b.reminderTime)));
     toast.success('Lembrete criado!');
-  }, [user]);
+  }, [user, update]);
 
   const updateReminder = useCallback(async (id: string, updates: Partial<CasinoReminder>) => {
     const { error } = await supabase
@@ -120,9 +119,9 @@ export const useReminders = () => {
       return;
     }
 
-    setReminders(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+    update(prev => (prev || []).map(r => r.id === id ? { ...r, ...updates } : r));
     toast.success('Lembrete atualizado!');
-  }, []);
+  }, [update]);
 
   const deleteReminder = useCallback(async (id: string) => {
     const { error } = await supabase
@@ -135,19 +134,18 @@ export const useReminders = () => {
       return;
     }
 
-    setReminders(prev => prev.filter(r => r.id !== id));
+    update(prev => (prev || []).filter(r => r.id !== id));
     toast.success('Lembrete removido!');
-  }, []);
+  }, [update]);
 
   const toggleReminder = useCallback(async (id: string) => {
     const reminder = reminders.find(r => r.id === id);
     if (!reminder) return;
-
     await updateReminder(id, { isActive: !reminder.isActive });
   }, [reminders, updateReminder]);
 
   const getTodayReminders = useCallback(() => {
-    const today = new Date().getDay();
+    const today = getDayBRT();
     return reminders.filter(r => r.isActive && r.daysOfWeek.includes(today));
   }, [reminders]);
 
@@ -160,6 +158,6 @@ export const useReminders = () => {
     deleteReminder,
     toggleReminder,
     getTodayReminders,
-    refetch: fetchReminders,
+    refetch: refresh,
   };
 };
