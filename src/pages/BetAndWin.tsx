@@ -20,7 +20,11 @@ import { RecommenderDialog } from '@/components/betandwin/RecommenderDialog';
 import { SlotNotesCard } from '@/components/betandwin/SlotNotesCard';
 import { HouseGameStatsCard } from '@/components/betandwin/HouseGameStatsCard';
 import { ACCOUNTS } from '@/types/casino';
-
+const QUICK_ROLLOVER_GAMES = [
+  { name: 'Chicken Dash', bet: '1.2' },
+  { name: 'Penalti Champion', bet: '1' },
+];
+const QUICK_REQUIRED_BETS = ['150', '200', '250', '500', '1000'];
 const BetAndWin = () => {
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -167,6 +171,9 @@ const BetAndWin = () => {
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Bloco 1: Contexto */}
             <div className="space-y-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => { setHouse('Bingo ao vivo'); setInitialBankroll('100'); }}>
+  Preencher padrão
+</Button>
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">1. Contexto</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div><Label>Data</Label><Input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} required /></div>
@@ -199,10 +206,25 @@ const BetAndWin = () => {
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">2. Configuração da Promoção</p>
               <div>
                 <Label>Jogo Rollover</Label>
+                <div className="flex flex-wrap gap-2 mt-2">
+  {QUICK_ROLLOVER_GAMES.map(g => (
+    <Button key={g.name} type="button" size="sm" variant={rolloverGame === g.name ? 'default' : 'outline'} onClick={() => { setRolloverGame(g.name); setBetValue(g.bet); }}>
+      {g.name}
+    </Button>
+  ))}
+</div>
                 <ComboboxInput value={rolloverGame} onChange={setRolloverGame} suggestions={games} placeholder="Ex: Sweet Bonanza" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><Label>Valor da Bet (R$)</Label><Input type="number" step="0.01" value={betValue} onChange={e => setBetValue(e.target.value)} placeholder="0.20" /></div>
+                <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
+  <span className="text-xs text-muted-foreground">Apostas necessárias:</span>
+  {QUICK_REQUIRED_BETS.map(v => (
+    <Button key={v} type="button" size="sm" variant={requiredBets === v ? 'default' : 'outline'} onClick={() => setRequiredBets(v)}>
+      {v}
+    </Button>
+  ))}
+</div>
                 <div><Label>Apostas Necessárias (R$)</Label><Input type="number" step="0.01" value={requiredBets} onChange={e => setRequiredBets(e.target.value)} placeholder="100.00" /></div>
               </div>
             </div>
